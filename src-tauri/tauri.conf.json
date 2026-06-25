@@ -1,0 +1,35 @@
+{
+  "productName": "Qoder Proxy",
+  "version": "1.0.0",
+  "identifier": "com.qoder.proxy",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "npx vue-tsc --noEmit && npx vite build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Qoder Proxy",
+        "width": 1000,
+        "height": 700,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.ico"],
+    "resources": [],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["SimpChinese", "English"],
+        "displayLanguageSelector": false
+      }
+    }
+  }
+}

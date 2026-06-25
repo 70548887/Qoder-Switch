@@ -1,0 +1,11 @@
+# Rust
+src-tauri/target/
+
+# Frontend
+node_modules/
+dist/
+
+# Lock files (keep pnpm-lock)
+*.lock
+!pnpm-lock.yaml
+!Cargo.lock
