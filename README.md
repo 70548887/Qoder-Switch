@@ -186,3 +186,14 @@ pnpm tauri build
 ## 许可证
 
 本项目基于 [MIT License](./LICENSE) 开源。
+
+---
+
+## 致谢
+
+本项目在开发过程中参考并借鉴了以下优秀项目的设计思路：
+
+- [qoderwork-account-switcher](https://github.com/963072676/qoderwork-account-switcher)
+- [QoderSessionManager](https://github.com/luckySpro/QoderSessionManager)
+
+感谢以上项目作者的贡献与启发。
