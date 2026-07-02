@@ -29,9 +29,9 @@
       <div class="space-y-3">
         <!-- 工作区选择 + 搜索 + 操作（一行） -->
         <div class="flex gap-3 items-center">
-          <select v-model="selectedWorkspace" @change="onWorkspaceChange" class="bg-dark-900 border border-gray-600 rounded px-3 py-2 text-white text-sm w-56">
+          <select v-model="selectedWorkspace" @change="onWorkspaceChange" class="bg-dark-900 border border-gray-600 rounded px-3 py-2 text-white text-sm w-72">
             <option value="" disabled>选择工作区</option>
-            <option v-for="ws in store.chatWorkspaces" :key="ws.id" :value="ws.id">{{ ws.name || ws.id }}</option>
+            <option v-for="ws in store.chatWorkspaces" :key="ws.id" :value="ws.id" :title="ws.path">{{ ws.name || ws.id }}</option>
           </select>
           <input v-model="searchQuery" @input="handleSearch" type="text" placeholder="搜索对话标题..." class="flex-1 bg-dark-900 border border-gray-600 rounded px-3 py-2 text-white text-sm" />
           <button @click="handleBackup" :disabled="!selectedWorkspace" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white text-xs rounded transition-colors">备份</button>

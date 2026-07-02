@@ -89,14 +89,65 @@ pub fn list_workspaces() -> Result<Vec<WorkspaceInfo>, String> {
                     .unwrap_or("")
                     .to_string();
 
-                let name = decode_workspace_path(&folder);
+                let full_path = decode_workspace_path(&folder);
+
+                // 提取最后一个目录名作为显示名称
+                let name = if full_path.is_empty() {
+                    // 尝试从 workspace.json 的其他字段获取名称
+                    let alt_name = ws.get("workspace")
+                        .and_then(|w| w.get("name"))
+                        .and_then(|n| n.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    if alt_name.is_empty() {
+                        format!("未命名-{}", &workspace_id[..std::cmp::min(8, workspace_id.len())])
+                    } else {
+                        alt_name
+                    }
+                } else {
+                    // 取路径最后一个非空段
+                    full_path.trim_end_matches('/')
+                        .rsplit('/')
+                        .next()
+                        .and_then(|s| if s.is_empty() { None } else { Some(s.to_string()) })
+                        .or_else(|| {
+                            full_path.trim_end_matches('\\')
+                                .rsplit('\\')
+                                .next()
+                                .and_then(|s| if s.is_empty() { None } else { Some(s.to_string()) })
+                        })
+                        .unwrap_or_else(|| full_path.clone())
+                };
 
                 workspaces.push(WorkspaceInfo {
                     id: workspace_id,
                     name,
-                    path: folder,
+                    path: full_path,
                 });
             }
+        }
+    }
+
+    // 按有无聊天记录排序：有记录的排前面
+    let global_db = base.join("User").join("globalStorage").join("state.vscdb");
+    if global_db.exists() {
+        if let Ok(conn) = rusqlite::Connection::open_with_flags(
+            &global_db,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        ) {
+            workspaces.sort_by(|a, b| {
+                let has_a = conn.query_row(
+                    "SELECT 1 FROM ItemTable WHERE key = ?1 LIMIT 1",
+                    [&format!("lingma.chat.localHistory.{}", a.id)],
+                    |_| Ok(()),
+                ).is_ok();
+                let has_b = conn.query_row(
+                    "SELECT 1 FROM ItemTable WHERE key = ?1 LIMIT 1",
+                    [&format!("lingma.chat.localHistory.{}", b.id)],
+                    |_| Ok(()),
+                ).is_ok();
+                has_b.cmp(&has_a)
+            });
         }
     }
 
