@@ -38,6 +38,7 @@ env_logger = "0.11"
 thiserror = "1"
 chrono = "0.4"
 rand = "0.8"
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"

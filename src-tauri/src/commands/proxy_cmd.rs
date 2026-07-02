@@ -31,7 +31,12 @@ pub async fn start_proxy(state: State<'_, AppState>) -> AppResult<()> {
     let ca_cert_pem = std::fs::read_to_string(&ca_cert_path)
         .map_err(|e| crate::error::AppError::Cert(format!("读取 CA 证书失败: {}", e)))?;
 
-    let mut server = ProxyServer::new(state.proxy_port, state.token_manager.clone(), state.metrics.clone(), state.logger.clone(), state.config.clone());
+    let mut server = ProxyServer::new(state.proxy_port, state.token_manager.clone(), state.metrics.clone(), state.logger.clone(), state.traffic_logger.clone(), state.config.clone());
+
+    // 从配置初始化 auto_rotate
+    let auto_rotate_val = state.config.read().await.auto_rotate;
+    *server.auto_rotate.write().await = auto_rotate_val;
+
     server.start(&ca_key_pem, &ca_cert_pem).await
         .map_err(|e| crate::error::AppError::Proxy(e))?;
 
@@ -78,10 +83,15 @@ pub async fn get_proxy_status(state: State<'_, AppState>) -> AppResult<ProxyStat
 
 #[tauri::command]
 pub async fn set_auto_rotate(state: State<'_, AppState>, enabled: bool) -> AppResult<()> {
+    // 更新运行时状态
     let proxy = state.proxy_server.read().await;
     if let Some(ref server) = *proxy {
         *server.auto_rotate.write().await = enabled;
     }
+    // 同步到配置并持久化
+    let mut cfg = state.config.write().await;
+    cfg.auto_rotate = enabled;
+    cfg.save(&state.config_path).map_err(|e| crate::error::AppError::Config(e))?;
     Ok(())
 }
 
@@ -112,6 +122,65 @@ fn generate_ca(
     std::fs::write(cert_path, cert.pem())?;
 
     Ok(())
+}
+
+#[derive(Serialize)]
+pub struct DashboardStats {
+    pub total_accounts: u32,
+    pub used_accounts: u32,
+    pub unused_accounts: u32,
+    pub total_chats: u32,
+    pub total_backups: u32,
+}
+
+#[tauri::command]
+pub async fn get_dashboard_stats(state: State<'_, AppState>) -> AppResult<DashboardStats> {
+    let accounts = state.token_manager.list().await;
+    let config = state.config.read().await;
+    let threshold = config.balance_threshold;
+
+    let total_accounts = accounts.len() as u32;
+    let used_accounts = accounts.iter().filter(|a| {
+        // 已过期的
+        if a.status == "expired" { return true; }
+        // 余额不足的（有余额数据且低于阈值）
+        if let (Some(used), Some(total)) = (a.quota_used, a.quota_total) {
+            let remaining = total.saturating_sub(used);
+            if threshold > 0 && remaining < threshold {
+                return true;
+            }
+        }
+        false
+    }).count() as u32;
+    let unused_accounts = total_accounts.saturating_sub(used_accounts);
+
+    // 统计所有工作区的对话总数
+    let total_chats = match crate::chat::list_workspaces() {
+        Ok(workspaces) => {
+            let mut count = 0u32;
+            for ws in &workspaces {
+                if let Ok(history) = crate::chat::get_chat_history(&ws.id) {
+                    count += history.len() as u32;
+                }
+            }
+            count
+        }
+        Err(_) => 0,
+    };
+
+    // 统计备份文件数
+    let total_backups = match crate::chat::list_backups() {
+        Ok(backups) => backups.len() as u32,
+        Err(_) => 0,
+    };
+
+    Ok(DashboardStats {
+        total_accounts,
+        used_accounts,
+        unused_accounts,
+        total_chats,
+        total_backups,
+    })
 }
 
 #[tauri::command]

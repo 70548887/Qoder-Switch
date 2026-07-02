@@ -1,105 +1,134 @@
-use crate::auth::cosy::build_cosy_headers;
-use crate::auth::token::TokenManager;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-#[derive(Serialize, Deserialize, Clone)]
+// ===== Plan API 响应结构 =====
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct UserPlan {
     pub user_type: String,
-    pub plan_name: String,
+    pub plan_tier_name: String,
+    pub is_personal_version: bool,
+    pub is_highest_tier: bool,
     pub start_date: i64,
     pub end_date: i64,
-    pub is_expired: bool,
-    pub days_remaining: i64,
 }
 
-#[derive(Serialize, Clone)]
+// ===== Quota/Usage API 响应结构 =====
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct QuotaUsage {
+    #[serde(rename = "userId")]
+    pub user_id: String,
+    #[serde(rename = "userType")]
+    pub user_type: String,
+    #[serde(rename = "usageType")]
+    pub usage_type: String,
+    #[serde(rename = "totalUsagePercentage")]
+    pub total_usage_percentage: f64,
+    #[serde(rename = "isQuotaExceeded")]
+    pub is_quota_exceeded: bool,
+    #[serde(rename = "expiresAt")]
+    pub expires_at: i64,
+    #[serde(rename = "userQuota")]
+    pub user_quota: UserQuota,
+    #[serde(rename = "isPlanQuotaProrated")]
+    pub is_plan_quota_prorated: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct UserQuota {
+    pub total: f64,
+    pub used: f64,
+    pub remaining: f64,
+    pub percentage: f64,
+    pub unit: String,
+}
+
+// ===== 返回给前端的结构 =====
+
+#[derive(Debug, Serialize, Clone)]
 pub struct QuotaResult {
     pub account_id: String,
     pub label: String,
-    pub plan: Option<UserPlan>,
+    pub plan_name: String,
+    pub user_type: String,
+    pub quota_used: f64,
+    pub quota_total: f64,
+    pub quota_remaining: f64,
+    pub quota_unit: String,
+    pub is_exceeded: bool,
+    pub expire_date: String,
     pub error: Option<String>,
 }
 
-pub async fn check_user_plan(
-    token: &str,
-    user_id: &str,
-    name: &str,
-    email: &str,
-) -> Result<UserPlan, String> {
-    let headers = build_cosy_headers(token, user_id, name, email, "/algo/api/v2/user", "")
-        .map_err(|e| format!("构建 Cosy 头失败: {}", e))?;
+// ===== API 调用函数 =====
+
+/// 查询用户订阅计划信息
+pub async fn check_user_plan(token: &str) -> Result<UserPlan, String> {
+    log::info!("[quota] 查询用户 Plan...");
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+
     let resp = client
-        .post("https://center.qoder.sh/algo/api/v2/user")
-        .header("authorization", &headers.authorization)
-        .header("cosy-user", &headers.cosy_user)
-        .header("cosy-key", &headers.cosy_key)
-        .header("cosy-date", &headers.cosy_date)
-        .header("x-request-id", &headers.request_id)
-        .header("content-length", "0")
-        .header("content-type", "application/json")
+        .get("https://openapi.qoder.sh/api/v2/user/plan")
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Accept", "application/json")
         .send()
         .await
-        .map_err(|e| format!("请求失败: {}", e))?;
+        .map_err(|e| format!("请求 Plan API 失败: {}", e))?;
 
-    if !resp.status().is_success() {
-        return Err(format!("API 返回 {}", resp.status()));
+    let status = resp.status();
+    let body_text = resp.text().await
+        .map_err(|e| format!("读取 Plan 响应体失败: {}", e))?;
+
+    log::info!("[quota] Plan API 状态码: {}, 响应长度: {} bytes", status, body_text.len());
+    log::debug!("[quota] Plan 响应内容: {}", &body_text[..body_text.len().min(500)]);
+
+    if !status.is_success() {
+        return Err(format!("Plan API 返回 {}: {}", status, &body_text[..body_text.len().min(200)]));
     }
 
-    let body: serde_json::Value = resp.json().await
-        .map_err(|e| format!("解析响应失败: {}", e))?;
+    let plan: UserPlan = serde_json::from_str(&body_text)
+        .map_err(|e| format!("解析 Plan JSON 失败: {} | body: {}", e, &body_text[..body_text.len().min(200)]))?;
 
-    let now_ms = chrono::Utc::now().timestamp_millis();
-    let end_date = body["end_date"].as_i64().unwrap_or(0);
-    let start_date = body["start_date"].as_i64().unwrap_or(0);
-    let days_remaining = (end_date - now_ms) / (1000 * 60 * 60 * 24);
-
-    Ok(UserPlan {
-        user_type: body["user_type"].as_str().unwrap_or("unknown").to_string(),
-        plan_name: body["plan_tier_name"].as_str().unwrap_or("Unknown").to_string(),
-        start_date,
-        end_date,
-        is_expired: end_date < now_ms,
-        days_remaining: days_remaining.max(0),
-    })
+    log::info!("[quota] Plan 查询成功: tier={}, type={}", plan.plan_tier_name, plan.user_type);
+    Ok(plan)
 }
 
-pub async fn check_all_plans(token_manager: &TokenManager) -> Vec<QuotaResult> {
-    let accounts = token_manager.list().await;
-    let mut handles = Vec::new();
+/// 查询用户配额使用情况（真实余额）
+pub async fn check_quota_usage(token: &str) -> Result<QuotaUsage, String> {
+    log::info!("[quota] 查询 Quota Usage...");
 
-    for account in accounts {
-        let token = account.token.clone();
-        let user_id = account.user_id.clone();
-        let name_val = account.name.clone();
-        let email = account.email.clone();
-        let id = account.id.clone();
-        let label = account.label.clone();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
 
-        handles.push(tokio::spawn(async move {
-            let plan = check_user_plan(&token, &user_id, &name_val, &email).await;
-            QuotaResult {
-                account_id: id,
-                label,
-                plan: plan.as_ref().ok().cloned(),
-                error: plan.err(),
-            }
-        }));
+    let resp = client
+        .get("https://openapi.qoder.sh/api/v2/quota/usage")
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(|e| format!("请求 Quota API 失败: {}", e))?;
+
+    let status = resp.status();
+    let body_text = resp.text().await
+        .map_err(|e| format!("读取 Quota 响应体失败: {}", e))?;
+
+    log::info!("[quota] Quota API 状态码: {}, 响应长度: {} bytes", status, body_text.len());
+    log::debug!("[quota] Quota 响应内容: {}", &body_text[..body_text.len().min(500)]);
+
+    if !status.is_success() {
+        return Err(format!("Quota API 返回 {}: {}", status, &body_text[..body_text.len().min(200)]));
     }
 
-    let mut results = Vec::new();
-    for handle in handles {
-        match handle.await {
-            Ok(result) => results.push(result),
-            Err(e) => {
-                log::warn!("额度查询任务异常: {}", e);
-            }
-        }
-    }
-    results
+    let usage: QuotaUsage = serde_json::from_str(&body_text)
+        .map_err(|e| format!("解析 Quota JSON 失败: {} | body: {}", e, &body_text[..body_text.len().min(200)]))?;
+
+    log::info!("[quota] Quota 查询成功: used={}/{}, exceeded={}", usage.user_quota.used, usage.user_quota.total, usage.is_quota_exceeded);
+    Ok(usage)
 }

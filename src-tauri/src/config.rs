@@ -11,7 +11,11 @@ pub struct ProxyConfig {
     pub max_retry: u32,
     pub language: String,
     pub account_pool_url: String,
+    #[serde(default = "default_balance_threshold")]
+    pub balance_threshold: u64,
 }
+
+fn default_balance_threshold() -> u64 { 10 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum RotateStrategy {
@@ -36,6 +40,7 @@ impl Default for ProxyConfig {
             max_retry: 3,
             language: "zh".to_string(),
             account_pool_url: "http://124.223.41.64/api/fetch-account".to_string(),
+            balance_threshold: 10,
         }
     }
 }

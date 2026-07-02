@@ -25,6 +25,7 @@ struct UserInfo {
     token: Option<String>,
     name: Option<String>,
     email: Option<String>,
+    quota: Option<u64>,
 }
 
 #[derive(Serialize, Clone)]
@@ -37,6 +38,9 @@ pub struct FetchedAccount {
     pub expire_date: String,
     pub machine_token: String,
     pub machine_id: String,
+    pub machine_code: String,
+    pub machine_type: String,
+    pub quota: Option<u64>,
 }
 
 /// 从账号池获取账号
@@ -80,5 +84,8 @@ pub async fn fetch_account(secret_key: &str, api_url: &str) -> Result<FetchedAcc
         expire_date: data.expire_date,
         machine_token: data.machine_token,
         machine_id: data.machine_id,
+        machine_code: data.machine_code,
+        machine_type: data.machine_type,
+        quota: user_info.quota,
     })
 }

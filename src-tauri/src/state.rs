@@ -1,6 +1,6 @@
 use crate::auth::token::TokenManager;
 use crate::config::ProxyConfig;
-use crate::logger::RequestLogger;
+use crate::logger::{RequestLogger, TrafficLogger};
 use crate::metrics::ProxyMetrics;
 use crate::proxy::cert::CertManager;
 use crate::proxy::server::ProxyServer;
@@ -14,6 +14,7 @@ pub struct AppState {
     pub proxy_port: u16,
     pub metrics: Arc<ProxyMetrics>,
     pub logger: Arc<RequestLogger>,
+    pub traffic_logger: Arc<TrafficLogger>,
     pub config: Arc<RwLock<ProxyConfig>>,
     pub config_path: std::path::PathBuf,
 }
@@ -42,6 +43,7 @@ impl AppState {
             proxy_port,
             metrics: Arc::new(ProxyMetrics::new()),
             logger: Arc::new(RequestLogger::new(200, target_domains)),
+            traffic_logger: Arc::new(TrafficLogger::new(data_dir)),
             config: Arc::new(RwLock::new(config)),
             config_path,
         }

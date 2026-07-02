@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
-import type { AccountToken, ProxyStatus, MetricsSnapshot, RequestLogEntry, QuotaResult, ProxyConfig } from '../types'
+import type { AccountToken, ProxyStatus, MetricsSnapshot, RequestLogEntry, QuotaResult, ProxyConfig, ChatHistory, WorkspaceInfo, BackupFileInfo } from '../types'
 
 interface StructuredAccount {
   token: string
@@ -14,13 +14,17 @@ export const useAppStore = defineStore('app', {
   state: () => ({
     accounts: [] as AccountToken[],
     status: null as ProxyStatus | null,
-    activeTab: 'accounts' as string,
+    activeTab: 'metrics' as string,
     loading: false,
     metrics: null as MetricsSnapshot | null,
     logs: [] as RequestLogEntry[],
     quotas: [] as QuotaResult[],
     discoveredDomains: [] as string[],
     config: null as ProxyConfig | null,
+    chatWorkspaces: [] as WorkspaceInfo[],
+    currentWorkspaceId: '',
+    chatList: [] as ChatHistory[],
+    backupList: [] as BackupFileInfo[],
   }),
 
   actions: {
@@ -31,7 +35,7 @@ export const useAppStore = defineStore('app', {
       this.accounts = await invoke<AccountToken[]>('list_accounts')
     },
     async fetchPoolAccount(secretKey: string) {
-      await invoke('fetch_pool_account', { secret_key: secretKey })
+      await invoke('fetch_pool_account', { secretKey })
       await this.fetchAccounts()
       await this.fetchStatus()
     },
@@ -107,6 +111,45 @@ export const useAppStore = defineStore('app', {
     async updateConfig(config: ProxyConfig) {
       await invoke('update_config', { config })
       this.config = config
+    },
+    async fetchChatWorkspaces() {
+      this.chatWorkspaces = await invoke<WorkspaceInfo[]>('list_chat_workspaces')
+    },
+    async fetchWorkspaceChats(workspaceId: string) {
+      this.currentWorkspaceId = workspaceId
+      this.chatList = await invoke<ChatHistory[]>('get_workspace_chats', { workspaceId })
+    },
+    async searchChats(workspaceId: string, query: string) {
+      this.chatList = await invoke<ChatHistory[]>('search_workspace_chats', { workspaceId, query })
+    },
+    async deleteChats(workspaceId: string, chatIds: string[]) {
+      await invoke('delete_workspace_chats', { workspaceId, chatIds })
+      await this.fetchWorkspaceChats(workspaceId)
+    },
+    async backupWorkspace(workspaceId: string) {
+      return await invoke<string>('backup_workspace_session', { workspaceId })
+    },
+    async restoreBackup(backupPath: string, targetWorkspaceId?: string) {
+      await invoke('restore_workspace_session', { 
+        workspaceId: targetWorkspaceId || null,
+        backupPath 
+      })
+      if (this.currentWorkspaceId) {
+        await this.fetchWorkspaceChats(this.currentWorkspaceId)
+      }
+    },
+    async fetchBackupList() {
+      this.backupList = await invoke<BackupFileInfo[]>('list_session_backups')
+    },
+    async backupAllWorkspaces() {
+      return await invoke<string>('backup_all_workspaces')
+    },
+    async exportMarkdown() {
+      return await invoke<string>('export_chats_markdown')
+    },
+    async deleteBackupFile(filePath: string) {
+      await invoke('delete_backup_file', { filePath })
+      await this.fetchBackupList()
     },
   }
 })

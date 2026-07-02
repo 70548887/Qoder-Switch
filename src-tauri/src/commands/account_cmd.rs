@@ -84,5 +84,17 @@ pub async fn fetch_pool_account(state: State<'_, AppState>, secret_key: String) 
         fetched.expire_date,
     ).await;
 
+    // 更新 machine 信息到最新添加的账号
+    let accounts = state.token_manager.list().await;
+    if let Some(last) = accounts.last() {
+        state.token_manager.update_machine_info(
+            &last.id,
+            fetched.machine_token,
+            fetched.machine_id,
+            fetched.machine_code,
+            fetched.machine_type,
+        ).await;
+    }
+
     Ok(())
 }

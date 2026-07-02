@@ -23,19 +23,20 @@
           >{{ statusText(item) }}</span>
         </div>
 
-        <template v-if="item.plan">
+        <template v-if="!item.error">
           <div class="text-sm text-gray-400 space-y-1">
-            <div>Plan: <span class="text-gray-300">{{ item.plan.plan_name }}</span></div>
-            <div>类型: <span class="text-gray-300">{{ item.plan.user_type }}</span></div>
+            <div>Plan: <span class="text-gray-300">{{ item.plan_name }}</span></div>
+            <div>类型: <span class="text-gray-300">{{ item.user_type }}</span></div>
             <div>
-              剩余:
-              <span :class="daysColor(item.plan)">
-                {{ item.plan.days_remaining }} 天
+              额度:
+              <span :class="quotaColor(item)">
+                {{ formatQuota(item.quota_remaining) }} / {{ formatQuota(item.quota_total) }} {{ item.quota_unit }}
               </span>
             </div>
+            <div v-if="item.expire_date">到期: <span class="text-gray-300">{{ item.expire_date }}</span></div>
           </div>
         </template>
-        <template v-else-if="item.error">
+        <template v-else>
           <div class="text-sm text-red-400">{{ item.error }}</div>
         </template>
       </div>
@@ -50,34 +51,40 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import { useAppStore } from '../stores/app'
-import type { QuotaResult, UserPlan } from '../types'
+import type { QuotaResult } from '../types'
 
 const store = useAppStore()
 
 function cardBorder(item: QuotaResult) {
-  if (item.plan?.is_expired) return 'border-red-500/50'
-  if (item.plan && item.plan.days_remaining <= 3) return 'border-orange-500/50'
+  if (item.error) return 'border-red-500/50'
+  if (item.is_exceeded) return 'border-red-500/50'
+  if (item.quota_total > 0 && item.quota_remaining / item.quota_total < 0.2) return 'border-orange-500/50'
   return 'border-gray-700'
 }
 
 function statusBadge(item: QuotaResult) {
   if (item.error) return 'bg-red-500/20 text-red-400'
-  if (item.plan?.is_expired) return 'bg-red-500/20 text-red-400'
-  if (item.plan && item.plan.days_remaining <= 3) return 'bg-orange-500/20 text-orange-400'
+  if (item.is_exceeded) return 'bg-red-500/20 text-red-400'
+  if (item.quota_total > 0 && item.quota_remaining / item.quota_total < 0.2) return 'bg-orange-500/20 text-orange-400'
   return 'bg-green-500/20 text-green-400'
 }
 
 function statusText(item: QuotaResult) {
   if (item.error) return '错误'
-  if (item.plan?.is_expired) return '已过期'
-  if (item.plan && item.plan.days_remaining <= 3) return '即将过期'
+  if (item.is_exceeded) return '已耗尽'
+  if (item.quota_total > 0 && item.quota_remaining / item.quota_total < 0.2) return '额度不足'
   return '正常'
 }
 
-function daysColor(plan: UserPlan) {
-  if (plan.is_expired) return 'text-red-400 font-medium'
-  if (plan.days_remaining <= 3) return 'text-orange-400 font-medium'
+function quotaColor(item: QuotaResult) {
+  if (item.is_exceeded) return 'text-red-400 font-medium'
+  if (item.quota_total > 0 && item.quota_remaining / item.quota_total < 0.2) return 'text-orange-400 font-medium'
   return 'text-green-400'
+}
+
+function formatQuota(value: number): string {
+  if (value >= 10000) return (value / 1000).toFixed(1) + 'k'
+  return value.toFixed(0)
 }
 
 onMounted(() => {

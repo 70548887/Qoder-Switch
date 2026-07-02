@@ -1,5 +1,6 @@
 mod account_pool;
 mod auth;
+mod chat;
 mod commands;
 mod config;
 mod error;
@@ -35,15 +36,6 @@ pub fn run() {
                 }
             });
 
-            // 检查是否自动启动代理
-            let config_for_start = app_state.config.clone();
-            tauri::async_runtime::spawn(async move {
-                let cfg = config_for_start.read().await;
-                if cfg.auto_start {
-                    log::info!("配置启用了 auto_start，自动启动代理");
-                }
-            });
-
             app.manage(app_state);
             tray::setup_tray(app.handle())?;
             Ok(())
@@ -61,6 +53,7 @@ pub fn run() {
             commands::proxy_cmd::set_auto_rotate,
             commands::proxy_cmd::get_metrics,
             commands::proxy_cmd::reset_metrics,
+            commands::proxy_cmd::get_dashboard_stats,
             commands::account_cmd::list_accounts,
             commands::account_cmd::add_accounts,
             commands::account_cmd::remove_account,
@@ -76,6 +69,16 @@ pub fn run() {
             commands::proxy_cmd::set_target_domains,
             commands::config_cmd::get_config,
             commands::config_cmd::update_config,
+            commands::chat_cmd::list_chat_workspaces,
+            commands::chat_cmd::get_workspace_chats,
+            commands::chat_cmd::search_workspace_chats,
+            commands::chat_cmd::delete_workspace_chats,
+            commands::chat_cmd::backup_workspace_session,
+            commands::chat_cmd::restore_workspace_session,
+            commands::chat_cmd::list_session_backups,
+            commands::chat_cmd::backup_all_workspaces,
+            commands::chat_cmd::export_chats_markdown,
+            commands::chat_cmd::delete_backup_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,6 +1,6 @@
 use crate::auth::token::TokenManager;
 use crate::config::ProxyConfig;
-use crate::logger::RequestLogger;
+use crate::logger::{RequestLogger, TrafficLogger};
 use crate::metrics::ProxyMetrics;
 use crate::proxy::handler::QoderProxyHandler;
 use hudsucker::certificate_authority::RcgenAuthority;
@@ -16,12 +16,13 @@ pub struct ProxyServer {
     pub running: Arc<RwLock<bool>>,
     pub metrics: Arc<ProxyMetrics>,
     pub logger: Arc<RequestLogger>,
+    pub traffic_logger: Arc<TrafficLogger>,
     pub config: Arc<RwLock<ProxyConfig>>,
     shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
 impl ProxyServer {
-    pub fn new(port: u16, token_manager: Arc<TokenManager>, metrics: Arc<ProxyMetrics>, logger: Arc<RequestLogger>, config: Arc<RwLock<ProxyConfig>>) -> Self {
+    pub fn new(port: u16, token_manager: Arc<TokenManager>, metrics: Arc<ProxyMetrics>, logger: Arc<RequestLogger>, traffic_logger: Arc<TrafficLogger>, config: Arc<RwLock<ProxyConfig>>) -> Self {
         Self {
             port,
             token_manager,
@@ -29,6 +30,7 @@ impl ProxyServer {
             running: Arc::new(RwLock::new(false)),
             metrics,
             logger,
+            traffic_logger,
             config,
             shutdown_tx: None,
         }
@@ -46,7 +48,10 @@ impl ProxyServer {
             auto_rotate: self.auto_rotate.clone(),
             metrics: self.metrics.clone(),
             logger: self.logger.clone(),
+            traffic_logger: self.traffic_logger.clone(),
             config: self.config.clone(),
+            last_log_id: Arc::new(tokio::sync::RwLock::new(0)),
+            last_request_is_target: Arc::new(tokio::sync::RwLock::new(false)),
         };
 
         let (tx, rx) = tokio::sync::oneshot::channel::<()>();

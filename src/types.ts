@@ -8,6 +8,8 @@ export interface AccountToken {
   status: string // "available" | "current" | "expired" | "error"
   user_type: string
   expire_date: string
+  quota_used?: number | null
+  quota_total?: number | null
 }
 
 export interface ProxyStatus {
@@ -39,21 +41,24 @@ export interface RequestLogEntry {
   status: number | null
   injected: boolean
   token_label: string | null
-}
-
-export interface UserPlan {
-  user_type: string
-  plan_name: string
-  start_date: number
-  end_date: number
-  is_expired: boolean
-  days_remaining: number
+  request_headers: string | null
+  request_body: string | null
+  response_headers: string | null
+  response_body: string | null
+  is_websocket: boolean
 }
 
 export interface QuotaResult {
   account_id: string
   label: string
-  plan: UserPlan | null
+  plan_name: string
+  user_type: string
+  quota_used: number
+  quota_total: number
+  quota_remaining: number
+  quota_unit: string
+  is_exceeded: boolean
+  expire_date: string
   error: string | null
 }
 
@@ -65,6 +70,8 @@ export interface ProxyConfig {
   auto_start: boolean
   max_retry: number
   language: string
+  account_pool_url: string
+  balance_threshold: number
 }
 
 export interface FetchedAccount {
@@ -76,4 +83,38 @@ export interface FetchedAccount {
   expire_date: string
   machine_token: string
   machine_id: string
+}
+
+export interface ChatHistory {
+  id: string
+  title: string
+  context: Array<{ id: string; name: string; type: string }>
+  timestamp: number
+  session_id: string
+  sessionId?: string
+}
+
+export interface WorkspaceInfo {
+  id: string
+  name: string
+  path: string
+}
+
+export interface SessionBackup {
+  backupTime: string
+  workspaceId: string
+  workspacePath: string
+  userId: string
+  chatHistory: ChatHistory[]
+  chatViews: any
+  chatTabs: any
+}
+
+export interface BackupFileInfo {
+  file_path: string
+  file_name: string
+  backup_time: string
+  workspace_id: string
+  workspace_path: string
+  file_size: number
 }

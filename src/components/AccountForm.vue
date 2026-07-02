@@ -16,16 +16,19 @@
       </div>
       
       <!-- 密钥模式 -->
-      <div v-if="mode === 'key'" class="flex gap-2">
-        <input
-          v-model="secretKey"
-          class="flex-1 bg-dark-900 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:border-accent outline-none"
-          placeholder="输入账号池密钥 (Secret Key)..."
-          @keyup.enter="handleFetchAccount"
-        />
-        <button @click="handleFetchAccount" class="px-4 py-2 bg-accent text-white rounded text-sm font-medium hover:bg-accent-hover whitespace-nowrap">
-          提取账号
-        </button>
+      <div v-if="mode === 'key'" class="flex flex-col gap-1">
+        <div class="flex gap-2">
+          <input
+            v-model="secretKey"
+            class="flex-1 bg-dark-900 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:border-accent outline-none"
+            placeholder="输入账号池密钥 (Secret Key)..."
+            @keyup.enter="handleFetchAccount"
+          />
+          <button @click="handleFetchAccount" class="px-4 py-2 bg-accent text-white rounded text-sm font-medium hover:bg-accent-hover whitespace-nowrap">
+            提取账号
+          </button>
+        </div>
+        <span class="text-xs text-yellow-500 mt-1">注意：当前账号池使用 HTTP 连接，请在可信网络环境中使用</span>
       </div>
       
       <!-- Token 模式（保留原有功能） -->

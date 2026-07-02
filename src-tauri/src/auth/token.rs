@@ -22,6 +22,18 @@ pub struct AccountToken {
     pub user_type: String,
     #[serde(default)]
     pub expire_date: String,
+    #[serde(default)]
+    pub quota_used: Option<u64>,
+    #[serde(default)]
+    pub quota_total: Option<u64>,
+    #[serde(default)]
+    pub machine_token: String,
+    #[serde(default)]
+    pub machine_id: String,
+    #[serde(default)]
+    pub machine_code: String,
+    #[serde(default)]
+    pub machine_type: String,
 }
 
 pub struct TokenManager {
@@ -105,6 +117,41 @@ impl TokenManager {
         Some(id)
     }
 
+    /// 查找并切换到第一个余额 >= threshold 的账号
+    /// 如果找不到满足条件的账号，不切换（保持当前）
+    pub async fn rotate_to_sufficient_balance(&self, threshold: u64) -> Option<String> {
+        let mut accounts = self.accounts.write().await;
+        let mut current = self.current.write().await;
+        
+        if accounts.is_empty() { return None; }
+        
+        let len = accounts.len();
+        let start = (*current + 1) % len;
+        
+        for i in 0..len {
+            let idx = (start + i) % len;
+            if idx == *current { continue; }
+            
+            let acc = &accounts[idx];
+            if acc.status == "expired" { continue; }
+            
+            let remaining = acc.quota_total.unwrap_or(u64::MAX)
+                .saturating_sub(acc.quota_used.unwrap_or(0));
+            if remaining >= threshold {
+                // 找到满足条件的账号，切换
+                accounts[*current].status = "available".to_string();
+                *current = idx;
+                accounts[idx].status = "current".to_string();
+                let id = accounts[idx].id.clone();
+                drop(accounts);
+                drop(current);
+                let _ = self.save().await;
+                return Some(id);
+            }
+        }
+        None // 没有找到余额充足的账号
+    }
+
     pub async fn add(&self, token: String, label: String, user_id: String, email: String, name: String, user_type: String, expire_date: String) {
         let id = format!("tok_{:x}", chrono::Utc::now().timestamp_millis());
         let entry = AccountToken {
@@ -117,6 +164,12 @@ impl TokenManager {
             status: "available".to_string(),
             user_type,
             expire_date,
+            quota_used: None,
+            quota_total: None,
+            machine_token: String::new(),
+            machine_id: String::new(),
+            machine_code: String::new(),
+            machine_type: String::new(),
         };
         let mut accounts = self.accounts.write().await;
         accounts.push(entry);
@@ -124,6 +177,18 @@ impl TokenManager {
         if let Err(e) = self.save().await {
             log::warn!("保存账号失败: {}", e);
         }
+    }
+
+    pub async fn update_machine_info(&self, id: &str, machine_token: String, machine_id: String, machine_code: String, machine_type: String) {
+        let mut accounts = self.accounts.write().await;
+        if let Some(account) = accounts.iter_mut().find(|a| a.id == id) {
+            account.machine_token = machine_token;
+            account.machine_id = machine_id;
+            account.machine_code = machine_code;
+            account.machine_type = machine_type;
+        }
+        drop(accounts);
+        let _ = self.save().await;
     }
 
     pub async fn bulk_add(&self, tokens_str: &str) {
@@ -148,6 +213,16 @@ impl TokenManager {
         if let Some(account) = accounts.iter_mut().find(|a| a.id == id) {
             account.user_type = user_type;
             account.expire_date = expire_date;
+        }
+        drop(accounts);
+        let _ = self.save().await;
+    }
+
+    pub async fn update_account_quota(&self, id: &str, quota_used: Option<u64>, quota_total: Option<u64>) {
+        let mut accounts = self.accounts.write().await;
+        if let Some(account) = accounts.iter_mut().find(|a| a.id == id) {
+            account.quota_used = quota_used;
+            account.quota_total = quota_total;
         }
         drop(accounts);
         let _ = self.save().await;

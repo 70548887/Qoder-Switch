@@ -17,6 +17,8 @@ pub enum AppError {
     Config(String),
     #[error("Account not found: {0}")]
     AccountNotFound(String),
+    #[error("Chat error: {0}")]
+    Chat(String),
 }
 
 #[derive(Serialize)]
@@ -35,6 +37,7 @@ impl From<AppError> for tauri::ipc::InvokeError {
             AppError::Cert(_) => "Cert",
             AppError::Config(_) => "Config",
             AppError::AccountNotFound(_) => "AccountNotFound",
+            AppError::Chat(_) => "Chat",
         };
         let serialized = SerializedError {
             message: err.to_string(),

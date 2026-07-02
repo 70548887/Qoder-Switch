@@ -9,3 +9,6 @@ dist/
 *.lock
 !pnpm-lock.yaml
 !Cargo.lock
+
+.claude/
+记录.md

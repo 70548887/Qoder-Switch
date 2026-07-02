@@ -59,9 +59,9 @@
               <input type="checkbox" :checked="selectedIds.includes(account.id)" @change="toggleSelect(account.id)" class="accent-blue-500" />
             </td>
             <td class="py-2.5 px-2 text-gray-500">{{ index + 1 }}</td>
-            <td class="py-2.5 px-2 text-white font-medium">{{ account.label || account.name || '-' }}</td>
+            <td class="py-2.5 px-2 text-white font-medium">{{ getDisplayName(account) }}</td>
             <td class="py-2.5 px-2 text-gray-400">{{ account.email || '-' }}</td>
-            <td class="py-2.5 px-2 text-gray-400">{{ account.user_type || '-' }}</td>
+            <td class="py-2.5 px-2 text-gray-400">{{ getUserType(account) }}</td>
             <td class="py-2.5 px-2 text-gray-400">{{ formatDate(account.expire_date) }}</td>
             <td class="py-2.5 px-2" :class="getBalanceClass(account)">{{ getBalanceText(account) }}</td>
             <td class="py-2.5 px-2">
@@ -105,7 +105,7 @@
 import { ref, computed } from 'vue'
 import { useAppStore } from '../stores/app'
 import { invoke } from '@tauri-apps/api/core'
-import type { UserPlan } from '../types'
+import type { QuotaResult } from '../types'
 
 const store = useAppStore()
 const selectedIds = ref<string[]>([])
@@ -113,10 +113,6 @@ const autoRotate = ref(true)
 const checkingIds = ref<Set<string>>(new Set())
 
 const accounts = computed(() => store.accounts)
-const currentAccount = computed(() => {
-  if (!store.status?.current_token_id) return null
-  return accounts.value.find(a => a.id === store.status?.current_token_id)
-})
 
 const isAllSelected = computed(() => {
   return accounts.value.length > 0 && selectedIds.value.length === accounts.value.length
@@ -155,9 +151,12 @@ async function handleBatchDelete() {
 async function handleCheckQuota(id: string) {
   try {
     checkingIds.value.add(id)
-    await invoke<UserPlan>('check_quota', { id })
+    const result = await invoke<QuotaResult>('check_quota', { id })
+    console.log('[quota] 查询成功:', result)
     await store.fetchAccounts()
-  } catch (e) {
+  } catch (e: any) {
+    const msg = typeof e === 'string' ? e : (e?.message || JSON.stringify(e))
+    alert('查询余额失败: ' + msg)
     console.error('查余额失败:', e)
   } finally {
     checkingIds.value.delete(id)
@@ -187,36 +186,44 @@ function formatDate(dateStr: string | undefined) {
   }
 }
 
-function getDaysRemaining(account: any): number | null {
-  if (!account.expire_date) return null
-  try {
-    const d = new Date(account.expire_date)
-    if (isNaN(d.getTime())) return null
-    const now = new Date()
-    const diff = Math.ceil((d.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
-    return diff
-  } catch {
-    return null
-  }
-}
-
 function getBalanceText(account: any): string {
-  const days = getDaysRemaining(account)
-  if (days === null) return '—'
-  if (days <= 0) return '已过期'
-  return `${days}天`
+  if (account.quota_used == null && account.quota_total == null) return '—'
+  if (account.quota_total === 0) return '—'
+  const remaining = (account.quota_total ?? 0) - (account.quota_used ?? 0)
+  return `${remaining} / ${account.quota_total}`
 }
 
 function getBalanceClass(account: any): string {
-  const days = getDaysRemaining(account)
-  if (days === null) return 'text-gray-500'
-  if (days <= 0) return 'text-red-400'
-  if (days <= 7) return 'text-yellow-400'
-  return 'text-green-400'
+  if (account.quota_used == null || account.quota_total == null) return 'text-gray-500'
+  const remaining = account.quota_total - account.quota_used
+  if (remaining <= 0) return 'text-red-400'  // 已耗尽
+  if (remaining < account.quota_total * 0.2) return 'text-yellow-400'  // 不足20%
+  return 'text-green-400'  // 充足
 }
 
 // 初始化时获取 auto_rotate 状态
 store.fetchStatus().then(() => {
   autoRotate.value = store.status?.auto_rotate ?? true
 })
+
+// 从 label 中提取名称和类型（格式: "Name (Type)"）
+function getDisplayName(account: any): string {
+  if (account.name) return account.name
+  if (account.label) {
+    // 从 "Kevin Nelson (Pro Trial)" 提取 "Kevin Nelson"
+    const match = account.label.match(/^(.+?)\s*\(.*\)$/)
+    return match ? match[1] : account.label
+  }
+  return '-'
+}
+
+function getUserType(account: any): string {
+  if (account.user_type) return account.user_type
+  // 从 label 中提取类型作为 fallback
+  if (account.label) {
+    const match = account.label.match(/\((.+)\)$/)
+    if (match) return match[1]
+  }
+  return '-'
+}
 </script>
