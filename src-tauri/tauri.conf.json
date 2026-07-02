@@ -1,6 +1,6 @@
 {
   "productName": "Qoder Proxy",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "identifier": "com.qoder.proxy",
   "build": {
     "frontendDist": "../dist",

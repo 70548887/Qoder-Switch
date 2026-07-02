@@ -520,6 +520,9 @@ pub fn restore_backup(target_workspace_id: Option<&str>, backup_path: &str) -> R
     // 先尝试解析为单个备份
     if let Ok(backup) = serde_json::from_str::<SessionBackup>(&data) {
         let workspace_id = target_workspace_id.unwrap_or(&backup.workspace_id);
+        if workspace_id.is_empty() {
+            return Err("工作区 ID 为空，无法恢复。请选择目标工作区后重试。".to_string());
+        }
         return restore_single_backup(workspace_id, &backup);
     }
 
@@ -529,6 +532,9 @@ pub fn restore_backup(target_workspace_id: Option<&str>, backup_path: &str) -> R
             return Err("备份文件为空".to_string());
         }
         if let Some(target_id) = target_workspace_id {
+            if target_id.is_empty() {
+                return Err("目标工作区 ID 为空".to_string());
+            }
             // 指定目标工作区：在数组中查找匹配的，或使用第一个
             let backup = backups.iter().find(|b| b.workspace_id == target_id)
                 .unwrap_or(&backups[0]);
@@ -536,6 +542,10 @@ pub fn restore_backup(target_workspace_id: Option<&str>, backup_path: &str) -> R
         }
         // 未指定目标：逐个恢复到各自原始工作区
         for backup in &backups {
+            if backup.workspace_id.is_empty() {
+                log::warn!("[chat] 跳过工作区 ID 为空的备份");
+                continue;
+            }
             if let Err(e) = restore_single_backup(&backup.workspace_id, backup) {
                 log::warn!("[chat] 恢复工作区 {} 失败: {}", backup.workspace_id, e);
             }

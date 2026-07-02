@@ -117,8 +117,6 @@
       </div>
     </div>
 
-    <!-- 隐藏的文件选择器 -->
-    <input ref="restoreFileInput" type="file" accept=".json" style="display: none" @change="handleRestoreFileSelected" />
   </div>
 </template>
 
@@ -133,7 +131,7 @@ const selectedWorkspace = ref('')
 const searchQuery = ref('')
 const selectedIds = ref<string[]>([])
 const expandedChatId = ref<string | null>(null)
-const restoreFileInput = ref<HTMLInputElement>()
+
 
 const filteredChats = computed(() => {
   if (!searchQuery.value) return store.chatList
@@ -209,30 +207,27 @@ async function handleBackup() {
   }
 }
 
-function handleRestore() {
-  restoreFileInput.value?.click()
-}
+async function handleRestore() {
+  const { open } = await import('@tauri-apps/plugin-dialog')
+  const filePath = await open({
+    title: '选择备份文件',
+    filters: [{ name: 'JSON', extensions: ['json'] }],
+    multiple: false
+  })
+  if (!filePath) return
 
-async function handleRestoreFileSelected(event: Event) {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file) return
-  const filePath = (file as any).path
-  if (!filePath) {
-    alert('无法获取文件路径，请确认使用桌面客户端')
-    input.value = ''
-    return
-  }
   const target = selectedWorkspace.value
     ? (confirm('恢复到当前选中的工作区？\n\n确定 = 恢复到当前工作区\n取消 = 恢复到备份原始工作区') ? selectedWorkspace.value : undefined)
     : undefined
   try {
-    await store.restoreBackup(filePath, target)
-    alert('恢复成功！')
+    await store.restoreBackup(filePath as string, target)
+    alert('恢复成功！\n\n注意：如果 IDE 正在运行，请重启 IDE 以加载恢复的对话记录。')
+    if (selectedWorkspace.value) {
+      await store.fetchWorkspaceChats(selectedWorkspace.value)
+    }
   } catch (e: any) {
     alert('恢复失败: ' + (typeof e === 'string' ? e : e?.message || JSON.stringify(e)))
   }
-  input.value = ''
 }
 
 async function handleRestoreFromList(backup: BackupFileInfo) {
@@ -241,7 +236,11 @@ async function handleRestoreFromList(backup: BackupFileInfo) {
     : undefined
   try {
     await store.restoreBackup(backup.file_path, target)
-    alert('恢复成功！')
+    alert('恢复成功！\n\n注意：如果 IDE 正在运行，请重启 IDE 以加载恢复的对话记录。')
+    if (selectedWorkspace.value) {
+      await store.fetchWorkspaceChats(selectedWorkspace.value)
+    }
+    await store.fetchBackupList()
   } catch (e: any) {
     alert('恢复失败: ' + (typeof e === 'string' ? e : e?.message || JSON.stringify(e)))
   }
