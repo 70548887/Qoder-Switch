@@ -6,6 +6,7 @@ mod config;
 mod error;
 mod logger;
 mod metrics;
+mod process;
 mod proxy;
 mod quota;
 mod state;
@@ -81,6 +82,9 @@ pub fn run() {
             commands::chat_cmd::export_chats_markdown,
             commands::chat_cmd::delete_backup_file,
             commands::chat_cmd::rebuild_session_views,
+            commands::chat_cmd::kill_qoder_ide,
+            commands::chat_cmd::launch_qoder_ide,
+            commands::chat_cmd::is_qoder_ide_running,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

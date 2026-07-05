@@ -227,9 +227,27 @@ async function handleRestore() {
   const target = selectedWorkspace.value
     ? (confirm('恢复到当前选中的工作区？\n\n确定 = 恢复到当前工作区\n取消 = 恢复到备份原始工作区') ? selectedWorkspace.value : undefined)
     : undefined
+
+  if (!confirm('将自动关闭 Qoder IDE 并在操作完成后重启。\n确定继续？')) return
+
   try {
+    // kill 是 best-effort
+    const killed = await store.killQoderIde().catch(() => 0)
+    if (killed > 0) {
+      await new Promise(r => setTimeout(r, 2000))
+    }
+
+    // 核心操作
     await store.restoreBackup(filePath as string, target)
-    alert('恢复成功！\n\n恢复时已自动补全缺失的会话视图，确保所有历史对话在 IDE 中可见。\n如果 IDE 正在运行，请重启 IDE 以加载恢复的对话记录。')
+
+    // 重启 IDE — best-effort
+    let ideStarted = true
+    try { await store.launchQoderIde() } catch { ideStarted = false }
+
+    alert(ideStarted
+      ? '恢复成功！IDE 已自动重启。\n\n恢复时已自动补全缺失的会话视图，确保所有历史对话在 IDE 中可见。'
+      : '恢复成功！\n\n恢复时已自动补全缺失的会话视图。\n自动启动 IDE 失败，请手动打开 IDE 查看效果。')
+
     if (selectedWorkspace.value) {
       await store.fetchWorkspaceChats(selectedWorkspace.value)
     }
@@ -242,9 +260,27 @@ async function handleRestoreFromList(backup: BackupFileInfo) {
   const target = selectedWorkspace.value
     ? (confirm(`恢复备份 "${backup.file_name}" 到当前选中的工作区？\n\n确定 = 当前工作区\n取消 = 备份原始工作区 (${backup.workspace_path || backup.workspace_id})`) ? selectedWorkspace.value : undefined)
     : undefined
+
+  if (!confirm('将自动关闭 Qoder IDE 并在操作完成后重启。\n确定继续？')) return
+
   try {
+    // kill 是 best-effort
+    const killed = await store.killQoderIde().catch(() => 0)
+    if (killed > 0) {
+      await new Promise(r => setTimeout(r, 2000))
+    }
+
+    // 核心操作
     await store.restoreBackup(backup.file_path, target)
-    alert('恢复成功！\n\n恢复时已自动补全缺失的会话视图，确保所有历史对话在 IDE 中可见。\n如果 IDE 正在运行，请重启 IDE 以加载恢复的对话记录。')
+
+    // 重启 IDE — best-effort
+    let ideStarted = true
+    try { await store.launchQoderIde() } catch { ideStarted = false }
+
+    alert(ideStarted
+      ? '恢复成功！IDE 已自动重启。\n\n恢复时已自动补全缺失的会话视图，确保所有历史对话在 IDE 中可见。'
+      : '恢复成功！\n\n恢复时已自动补全缺失的会话视图。\n自动启动 IDE 失败，请手动打开 IDE 查看效果。')
+
     if (selectedWorkspace.value) {
       await store.fetchWorkspaceChats(selectedWorkspace.value)
     }
@@ -295,9 +331,24 @@ async function handleBackupAll() {
 
 async function handleRebuildViews() {
   if (!selectedWorkspace.value) return
+  if (!confirm('将自动关闭 Qoder IDE 并在操作完成后重启。\n确定继续？')) return
   try {
+    // kill 是 best-effort
+    const killed = await store.killQoderIde().catch(() => 0)
+    if (killed > 0) {
+      await new Promise(r => setTimeout(r, 2000))
+    }
+    
+    // 核心操作 — 失败才算真正失败
     await store.rebuildSessionViews(selectedWorkspace.value)
-    alert('修复成功！\n\n请重启 IDE 以查看恢复的历史对话。')
+    
+    // 重启 IDE — best-effort
+    let ideStarted = true
+    try { await store.launchQoderIde() } catch { ideStarted = false }
+    
+    alert(ideStarted
+      ? '修复成功！IDE 已自动重启，历史对话已恢复。'
+      : '修复成功！\n自动启动 IDE 失败，请手动打开 IDE 查看效果。')
   } catch (e: any) {
     alert('修复失败: ' + (typeof e === 'string' ? e : e?.message || JSON.stringify(e)))
   }

@@ -154,5 +154,14 @@ export const useAppStore = defineStore('app', {
     async rebuildSessionViews(workspaceId: string) {
       await invoke('rebuild_session_views', { workspaceId })
     },
+    async killQoderIde() {
+      return await invoke<number>('kill_qoder_ide')
+    },
+    async launchQoderIde() {
+      await invoke('launch_qoder_ide')
+    },
+    async isQoderIdeRunning() {
+      return await invoke<boolean>('is_qoder_ide_running')
+    },
   }
 })

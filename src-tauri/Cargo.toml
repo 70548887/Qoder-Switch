@@ -1,6 +1,6 @@
 [package]
 name = "qoder-proxy"
-version = "1.0.3"
+version = "1.0.4"
 edition = "2021"
 
 [lib]
@@ -40,6 +40,7 @@ thiserror = "1"
 chrono = "0.4"
 rand = "0.8"
 rusqlite = { version = "0.32", features = ["bundled"] }
+sysinfo = "0.31"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"

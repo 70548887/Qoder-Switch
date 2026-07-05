@@ -72,3 +72,18 @@ pub async fn delete_backup_file(file_path: String) -> AppResult<()> {
 pub async fn rebuild_session_views(workspace_id: String) -> AppResult<()> {
     chat::rebuild_session_views(&workspace_id).map_err(|e| AppError::Chat(e))
 }
+
+#[tauri::command]
+pub async fn kill_qoder_ide() -> AppResult<u32> {
+    crate::process::kill_qoder_ide().map_err(|e| AppError::Chat(e))
+}
+
+#[tauri::command]
+pub async fn launch_qoder_ide() -> AppResult<()> {
+    crate::process::launch_qoder_ide().map_err(|e| AppError::Chat(e))
+}
+
+#[tauri::command]
+pub fn is_qoder_ide_running() -> AppResult<bool> {
+    Ok(crate::process::is_qoder_ide_running())
+}
