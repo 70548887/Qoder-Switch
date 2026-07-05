@@ -80,6 +80,7 @@ pub fn run() {
             commands::chat_cmd::backup_all_workspaces,
             commands::chat_cmd::export_chats_markdown,
             commands::chat_cmd::delete_backup_file,
+            commands::chat_cmd::rebuild_session_views,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

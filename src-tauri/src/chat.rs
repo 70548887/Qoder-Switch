@@ -394,13 +394,26 @@ pub fn backup_workspace(workspace_id: &str) -> Result<SessionBackup, String> {
 
 /// 保存备份到文件
 pub fn save_backup(backup: &SessionBackup) -> Result<String, String> {
-    let backup_dir = get_backup_directory();
-    std::fs::create_dir_all(&backup_dir)
-        .map_err(|e| format!("创建备份目录失败: {}", e))?;
+    save_backup_to(backup, None)
+}
 
-    let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
-    let filename = format!("qoder-backup-{}.json", timestamp);
-    let backup_path = backup_dir.join(&filename);
+/// 保存备份到指定路径（如果提供），否则保存到默认备份目录
+pub fn save_backup_to(backup: &SessionBackup, save_path: Option<&str>) -> Result<String, String> {
+    let backup_path = if let Some(path) = save_path {
+        let p = std::path::PathBuf::from(path);
+        if let Some(parent) = p.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("创建目录失败: {}", e))?;
+        }
+        p
+    } else {
+        let backup_dir = get_backup_directory();
+        std::fs::create_dir_all(&backup_dir)
+            .map_err(|e| format!("创建备份目录失败: {}", e))?;
+        let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+        let filename = format!("qoder-backup-{}.json", timestamp);
+        backup_dir.join(&filename)
+    };
 
     let json = serde_json::to_string_pretty(backup)
         .map_err(|e| format!("序列化备份失败: {}", e))?;
@@ -611,6 +624,177 @@ fn restore_single_backup(workspace_id: &str, backup: &SessionBackup) -> Result<(
     }
 
     log::info!("[chat] 恢复完成：目标工作区 {}，{}条对话", workspace_id, backup.chat_history.len());
+
+    // 恢复后自动重建 chatViews/chatTabs，确保所有 sessionId 可见
+    if let Err(e) = rebuild_session_views(workspace_id) {
+        log::warn!("[chat] 恢复后重建会话视图失败: {}", e);
+    }
+
+    Ok(())
+}
+
+/// 重建工作区的 chatViews 和 chatTabs，确保所有 sessionId 都被 IDE 发现
+pub fn rebuild_session_views(workspace_id: &str) -> Result<(), String> {
+    let base = get_qoder_base_path();
+
+    // 1. 读取该工作区所有聊天历史
+    let chat_history = get_chat_history(workspace_id)?;
+    if chat_history.is_empty() {
+        log::info!("[chat] 工作区 {} 无聊天记录，跳过重建", workspace_id);
+        return Ok(());
+    }
+
+    // 2. 收集所有唯一 sessionId
+    let mut session_ids: Vec<String> = chat_history.iter()
+        .map(|ch| ch.session_id.clone())
+        .filter(|sid| !sid.is_empty())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    session_ids.sort();
+
+    if session_ids.is_empty() {
+        return Ok(());
+    }
+
+    // 3. 打开工作区数据库
+    let ws_db = base.join("User").join("workspaceStorage")
+        .join(workspace_id).join("state.vscdb");
+    if !ws_db.exists() {
+        log::info!("[chat] 工作区数据库不存在，跳过: {:?}", ws_db);
+        return Ok(());
+    }
+
+    let conn = rusqlite::Connection::open_with_flags(
+        &ws_db,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ).map_err(|e| format!("打开工作区数据库失败: {}", e))?;
+
+    // 4. 读取现有 chatViews，获取已注册的 sessionId
+    let existing_views_str: Option<String> = match conn.query_row(
+        "SELECT value FROM ItemTable WHERE key = ?1",
+        ["aicoding.chat.views"],
+        |row| row.get(0),
+    ) {
+        Ok(v) => Some(v),
+        Err(rusqlite::Error::QueryReturnedNoRows) => None,
+        Err(e) => {
+            log::warn!("[chat] 查询 chatViews 失败: {}", e);
+            None
+        }
+    };
+
+    let existing_tabs_str: Option<String> = match conn.query_row(
+        "SELECT value FROM ItemTable WHERE key = ?1",
+        ["aicoding.chat.tabs"],
+        |row| row.get(0),
+    ) {
+        Ok(v) => Some(v),
+        Err(rusqlite::Error::QueryReturnedNoRows) => None,
+        Err(e) => {
+            log::warn!("[chat] 查询 chatTabs 失败: {}", e);
+            None
+        }
+    };
+
+    // 解析现有 views
+    let mut views_arr: Vec<serde_json::Value> = existing_views_str
+        .as_deref()
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default();
+
+    // 解析现有 tabs
+    let mut tabs_obj: serde_json::Value = existing_tabs_str
+        .as_deref()
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or(serde_json::json!({"activeTabId": "", "tabs": []}));
+
+    // 5. 分别收集 chatViews 和 chatTabs 中已存在的 sessionId
+    let mut existing_views_sessions: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for v in &views_arr {
+        if let Some(sid) = v.get("sessionId").and_then(|s| s.as_str()) {
+            existing_views_sessions.insert(sid.to_string());
+        }
+    }
+
+    let mut existing_tabs_sessions: std::collections::HashSet<String> = std::collections::HashSet::new();
+    if let Some(tabs) = tabs_obj.get("tabs").and_then(|t| t.as_array()) {
+        for t in tabs {
+            if let Some(sid) = t.get("sessionId").and_then(|s| s.as_str()) {
+                existing_tabs_sessions.insert(sid.to_string());
+            }
+        }
+    }
+
+    // 6. 分别检查两边是否有缺失
+    let has_missing_views = session_ids.iter().any(|sid| !existing_views_sessions.contains(sid));
+    let has_missing_tabs = session_ids.iter().any(|sid| !existing_tabs_sessions.contains(sid));
+
+    if !has_missing_views && !has_missing_tabs {
+        log::info!("[chat] 工作区 {} 所有 sessionId 已在 chatViews/chatTabs 中", workspace_id);
+        return Ok(());
+    }
+
+    let missing_views_count = session_ids.iter().filter(|sid| !existing_views_sessions.contains(*sid)).count();
+    let missing_tabs_count = session_ids.iter().filter(|sid| !existing_tabs_sessions.contains(*sid)).count();
+    log::info!("[chat] 工作区 {} 发现缺失: views={}, tabs={}，正在重建", workspace_id, missing_views_count, missing_tabs_count);
+
+    // 7. 为每个 sessionId 独立判断并补充缺失条目
+    for sid in &session_ids {
+        // 从 chatHistory 中找出该 sessionId 的最新对话标题
+        let title = chat_history.iter()
+            .filter(|ch| &ch.session_id == sid)
+            .max_by_key(|ch| ch.timestamp)
+            .map(|ch| ch.title.clone())
+            .unwrap_or_else(|| {
+                let prefix: String = sid.chars().take(8).collect();
+                format!("会话 {}", prefix)
+            });
+
+        if !existing_views_sessions.contains(sid) {
+            let view_id = uuid::Uuid::new_v4().to_string();
+            views_arr.push(serde_json::json!({
+                "active": false,
+                "id": sid.to_string(),
+                "location": "auxiliaryBar",
+                "sessionId": sid.to_string(),
+                "sessionType": "assistant",
+                "targetRemoteAuthority": null,
+                "title": title,
+                "viewId": view_id
+            }));
+        }
+
+        if !existing_tabs_sessions.contains(sid) {
+            let tab_id = uuid::Uuid::new_v4().to_string();
+            if let Some(tabs) = tabs_obj.get_mut("tabs").and_then(|t| t.as_array_mut()) {
+                tabs.push(serde_json::json!({
+                    "sessionId": sid.to_string(),
+                    "tabId": tab_id,
+                    "targetRemoteAuthority": null,
+                    "title": title
+                }));
+            }
+        }
+    }
+
+    // 8. 写回数据库
+    let views_json = serde_json::to_string(&views_arr)
+        .map_err(|e| format!("序列化 chatViews 失败: {}", e))?;
+    let tabs_json = serde_json::to_string(&tabs_obj)
+        .map_err(|e| format!("序列化 chatTabs 失败: {}", e))?;
+
+    conn.execute(
+        "INSERT OR REPLACE INTO ItemTable(key, value) VALUES(?1, ?2)",
+        rusqlite::params!["aicoding.chat.views", views_json],
+    ).map_err(|e| format!("写入 chatViews 失败: {}", e))?;
+
+    conn.execute(
+        "INSERT OR REPLACE INTO ItemTable(key, value) VALUES(?1, ?2)",
+        rusqlite::params!["aicoding.chat.tabs", tabs_json],
+    ).map_err(|e| format!("写入 chatTabs 失败: {}", e))?;
+
+    log::info!("[chat] 工作区 {} 成功重建会话视图 (views={}, tabs={})", workspace_id, missing_views_count, missing_tabs_count);
     Ok(())
 }
 

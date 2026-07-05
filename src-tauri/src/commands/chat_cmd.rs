@@ -37,9 +37,9 @@ pub async fn delete_workspace_chats(
 }
 
 #[tauri::command]
-pub async fn backup_workspace_session(workspace_id: String) -> AppResult<String> {
+pub async fn backup_workspace_session(workspace_id: String, save_path: Option<String>) -> AppResult<String> {
     let backup = chat::backup_workspace(&workspace_id).map_err(|e| AppError::Chat(e))?;
-    let path = chat::save_backup(&backup).map_err(|e| AppError::Chat(e))?;
+    let path = chat::save_backup_to(&backup, save_path.as_deref()).map_err(|e| AppError::Chat(e))?;
     Ok(path)
 }
 
@@ -66,4 +66,9 @@ pub async fn export_chats_markdown() -> AppResult<String> {
 #[tauri::command]
 pub async fn delete_backup_file(file_path: String) -> AppResult<()> {
     chat::delete_backup_file(&file_path).map_err(|e| AppError::Chat(e))
+}
+
+#[tauri::command]
+pub async fn rebuild_session_views(workspace_id: String) -> AppResult<()> {
+    chat::rebuild_session_views(&workspace_id).map_err(|e| AppError::Chat(e))
 }

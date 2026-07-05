@@ -9,7 +9,7 @@
       <!-- 产品名 -->
       <span class="text-white font-semibold text-sm">Qoder Proxy</span>
       <!-- 版本号 -->
-      <span class="bg-gray-700 text-gray-300 text-xs px-2 py-0.5 rounded">v1.0.0</span>
+      <span class="bg-gray-700 text-gray-300 text-xs px-2 py-0.5 rounded">v{{ appVersion }}</span>
       <!-- 检测更新 -->
       <button @click="checkUpdate" class="text-blue-400 text-xs hover:text-blue-300 transition">
         检测更新
@@ -43,13 +43,22 @@
 </template>
 
 <script setup lang="ts">
+import { ref, onMounted } from 'vue'
+import { getVersion } from '@tauri-apps/api/app'
 import { useAppStore } from '../stores/app'
 
 const store = useAppStore()
+const appVersion = ref('1.0.3')
 
 defineEmits(['showGuide'])
 
+onMounted(async () => {
+  try {
+    appVersion.value = await getVersion()
+  } catch {}
+})
+
 async function checkUpdate() {
-  alert('当前版本 v1.0.0，自动更新将在后续版本启用')
+  alert(`当前版本 v${appVersion.value}，自动更新将在后续版本启用`)
 }
 </script>

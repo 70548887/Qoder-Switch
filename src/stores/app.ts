@@ -126,8 +126,8 @@ export const useAppStore = defineStore('app', {
       await invoke('delete_workspace_chats', { workspaceId, chatIds })
       await this.fetchWorkspaceChats(workspaceId)
     },
-    async backupWorkspace(workspaceId: string) {
-      return await invoke<string>('backup_workspace_session', { workspaceId })
+    async backupWorkspace(workspaceId: string, savePath?: string) {
+      return await invoke<string>('backup_workspace_session', { workspaceId, savePath })
     },
     async restoreBackup(backupPath: string, targetWorkspaceId?: string) {
       await invoke('restore_workspace_session', { 
@@ -150,6 +150,9 @@ export const useAppStore = defineStore('app', {
     async deleteBackupFile(filePath: string) {
       await invoke('delete_backup_file', { filePath })
       await this.fetchBackupList()
+    },
+    async rebuildSessionViews(workspaceId: string) {
+      await invoke('rebuild_session_views', { workspaceId })
     },
   }
 })

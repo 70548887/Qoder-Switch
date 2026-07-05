@@ -36,6 +36,7 @@
           <input v-model="searchQuery" @input="handleSearch" type="text" placeholder="搜索对话标题..." class="flex-1 bg-dark-900 border border-gray-600 rounded px-3 py-2 text-white text-sm" />
           <button @click="handleBackup" :disabled="!selectedWorkspace" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white text-xs rounded transition-colors">备份</button>
           <button @click="handleRestore" class="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs rounded transition-colors">恢复</button>
+          <button @click="handleRebuildViews" :disabled="!selectedWorkspace" class="px-3 py-1.5 bg-yellow-600 hover:bg-yellow-700 disabled:bg-gray-600 text-white text-xs rounded transition-colors">修复显示</button>
         </div>
       </div>
 
@@ -199,7 +200,14 @@ async function handleSearch() {
 async function handleBackup() {
   if (!selectedWorkspace.value) return
   try {
-    const path = await store.backupWorkspace(selectedWorkspace.value)
+    const { save } = await import('@tauri-apps/plugin-dialog')
+    const savePath = await save({
+      title: '选择备份保存位置',
+      defaultPath: `qoder-backup-${new Date().toISOString().slice(0,10)}.json`,
+      filters: [{ name: 'JSON', extensions: ['json'] }]
+    })
+    if (!savePath) return
+    const path = await store.backupWorkspace(selectedWorkspace.value, savePath)
     alert('备份成功！\n保存位置: ' + path)
     await store.fetchBackupList()
   } catch (e: any) {
@@ -221,7 +229,7 @@ async function handleRestore() {
     : undefined
   try {
     await store.restoreBackup(filePath as string, target)
-    alert('恢复成功！\n\n注意：如果 IDE 正在运行，请重启 IDE 以加载恢复的对话记录。')
+    alert('恢复成功！\n\n恢复时已自动补全缺失的会话视图，确保所有历史对话在 IDE 中可见。\n如果 IDE 正在运行，请重启 IDE 以加载恢复的对话记录。')
     if (selectedWorkspace.value) {
       await store.fetchWorkspaceChats(selectedWorkspace.value)
     }
@@ -236,7 +244,7 @@ async function handleRestoreFromList(backup: BackupFileInfo) {
     : undefined
   try {
     await store.restoreBackup(backup.file_path, target)
-    alert('恢复成功！\n\n注意：如果 IDE 正在运行，请重启 IDE 以加载恢复的对话记录。')
+    alert('恢复成功！\n\n恢复时已自动补全缺失的会话视图，确保所有历史对话在 IDE 中可见。\n如果 IDE 正在运行，请重启 IDE 以加载恢复的对话记录。')
     if (selectedWorkspace.value) {
       await store.fetchWorkspaceChats(selectedWorkspace.value)
     }
@@ -282,6 +290,16 @@ async function handleBackupAll() {
     await store.fetchBackupList()
   } catch (e: any) {
     alert('批量备份失败: ' + (typeof e === 'string' ? e : e?.message || JSON.stringify(e)))
+  }
+}
+
+async function handleRebuildViews() {
+  if (!selectedWorkspace.value) return
+  try {
+    await store.rebuildSessionViews(selectedWorkspace.value)
+    alert('修复成功！\n\n请重启 IDE 以查看恢复的历史对话。')
+  } catch (e: any) {
+    alert('修复失败: ' + (typeof e === 'string' ? e : e?.message || JSON.stringify(e)))
   }
 }
 
