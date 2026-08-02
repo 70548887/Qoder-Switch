@@ -118,3 +118,17 @@ export interface BackupFileInfo {
   workspace_path: string
   file_size: number
 }
+
+export interface MergeResult {
+  merged: number
+  skipped: number
+  target_total: number
+  source_backup: string
+  target_backup: string
+}
+
+export interface DeleteWorkspaceResult {
+  backup_path: string
+  dir_deleted: boolean
+  chat_key_deleted: boolean
+}

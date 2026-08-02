@@ -74,6 +74,20 @@ pub async fn rebuild_session_views(workspace_id: String) -> AppResult<()> {
 }
 
 #[tauri::command]
+pub async fn merge_workspace_chats(
+    source_workspace_id: String,
+    target_workspace_id: String,
+) -> AppResult<chat::MergeResult> {
+    chat::merge_workspace_chats(&source_workspace_id, &target_workspace_id)
+        .map_err(|e| AppError::Chat(e))
+}
+
+#[tauri::command]
+pub async fn delete_workspace(workspace_id: String) -> AppResult<chat::DeleteWorkspaceResult> {
+    chat::delete_workspace(&workspace_id).map_err(|e| AppError::Chat(e))
+}
+
+#[tauri::command]
 pub async fn kill_qoder_ide() -> AppResult<u32> {
     crate::process::kill_qoder_ide().map_err(|e| AppError::Chat(e))
 }

@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
-import type { AccountToken, ProxyStatus, MetricsSnapshot, RequestLogEntry, QuotaResult, ProxyConfig, ChatHistory, WorkspaceInfo, BackupFileInfo } from '../types'
+import type { AccountToken, ProxyStatus, MetricsSnapshot, RequestLogEntry, QuotaResult, ProxyConfig, ChatHistory, WorkspaceInfo, BackupFileInfo, MergeResult, DeleteWorkspaceResult } from '../types'
 
 interface StructuredAccount {
   token: string
@@ -153,6 +153,15 @@ export const useAppStore = defineStore('app', {
     },
     async rebuildSessionViews(workspaceId: string) {
       await invoke('rebuild_session_views', { workspaceId })
+    },
+    async mergeWorkspaces(sourceId: string, targetId: string) {
+      return await invoke<MergeResult>('merge_workspace_chats', {
+        sourceWorkspaceId: sourceId,
+        targetWorkspaceId: targetId,
+      })
+    },
+    async deleteWorkspace(workspaceId: string) {
+      return await invoke<DeleteWorkspaceResult>('delete_workspace', { workspaceId })
     },
     async killQoderIde() {
       return await invoke<number>('kill_qoder_ide')

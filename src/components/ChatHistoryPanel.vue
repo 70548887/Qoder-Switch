@@ -37,6 +37,19 @@
           <button @click="handleBackup" :disabled="!selectedWorkspace" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white text-xs rounded transition-colors">备份</button>
           <button @click="handleRestore" class="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs rounded transition-colors">恢复</button>
           <button @click="handleRebuildViews" :disabled="!selectedWorkspace" class="px-3 py-1.5 bg-yellow-600 hover:bg-yellow-700 disabled:bg-gray-600 text-white text-xs rounded transition-colors">修复显示</button>
+          <button @click="toggleMerge" :disabled="!selectedWorkspace" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-600 text-white text-xs rounded transition-colors">合并</button>
+          <button @click="handleDeleteWorkspace" :disabled="!selectedWorkspace" class="px-3 py-1.5 bg-red-600 hover:bg-red-700 disabled:bg-gray-600 text-white text-xs rounded transition-colors">删除</button>
+        </div>
+
+        <!-- 内联合并区 -->
+        <div v-if="showMerge" class="flex gap-3 items-center bg-dark-900 border border-gray-700 rounded px-3 py-2">
+          <span class="text-sm text-gray-300 whitespace-nowrap">将【{{ currentWorkspaceName }}】合并到：</span>
+          <select v-model="mergeTarget" class="bg-dark-800 border border-gray-600 rounded px-3 py-2 text-white text-sm w-72">
+            <option value="" disabled>选择目标工作区</option>
+            <option v-for="ws in mergeTargetOptions" :key="ws.id" :value="ws.id" :title="ws.path">{{ ws.name || ws.id }}</option>
+          </select>
+          <button @click="handleMerge" :disabled="!mergeTarget" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-600 text-white text-xs rounded transition-colors">确认合并</button>
+          <button @click="showMerge = false" class="px-3 py-1.5 bg-dark-700 hover:bg-dark-600 text-gray-300 text-xs rounded transition-colors">取消</button>
         </div>
       </div>
 
@@ -132,6 +145,8 @@ const selectedWorkspace = ref('')
 const searchQuery = ref('')
 const selectedIds = ref<string[]>([])
 const expandedChatId = ref<string | null>(null)
+const showMerge = ref(false)
+const mergeTarget = ref('')
 
 
 const filteredChats = computed(() => {
@@ -142,6 +157,15 @@ const filteredChats = computed(() => {
 
 const isAllSelected = computed(() => {
   return filteredChats.value.length > 0 && selectedIds.value.length === filteredChats.value.length
+})
+
+const currentWorkspaceName = computed(() => {
+  const ws = store.chatWorkspaces.find(w => w.id === selectedWorkspace.value)
+  return ws?.name || ws?.id || ''
+})
+
+const mergeTargetOptions = computed(() => {
+  return store.chatWorkspaces.filter(w => w.id !== selectedWorkspace.value)
 })
 
 function switchToBackups() {
@@ -188,6 +212,8 @@ async function onWorkspaceChange() {
   selectedIds.value = []
   searchQuery.value = ''
   expandedChatId.value = null
+  showMerge.value = false
+  mergeTarget.value = ''
   if (selectedWorkspace.value) {
     await store.fetchWorkspaceChats(selectedWorkspace.value)
   }
@@ -351,6 +377,62 @@ async function handleRebuildViews() {
       : '修复成功！\n自动启动 IDE 失败，请手动打开 IDE 查看效果。')
   } catch (e: any) {
     alert('修复失败: ' + (typeof e === 'string' ? e : e?.message || JSON.stringify(e)))
+  }
+}
+
+function toggleMerge() {
+  if (!selectedWorkspace.value) return
+  showMerge.value = !showMerge.value
+  mergeTarget.value = ''
+}
+
+async function handleMerge() {
+  if (!selectedWorkspace.value || !mergeTarget.value) return
+  if (!confirm('将把源工作区对话移动并入目标，源对话会清空。\n操作前自动备份源与目标，并会关闭/重启 Qoder IDE。\n确定继续？')) return
+  try {
+    const killed = await store.killQoderIde().catch(() => 0)
+    if (killed > 0) {
+      await new Promise(r => setTimeout(r, 2000))
+    }
+    const r = await store.mergeWorkspaces(selectedWorkspace.value, mergeTarget.value)
+    let ideStarted = true
+    try { await store.launchQoderIde() } catch { ideStarted = false }
+    alert(`已合并：并入 ${r.merged} 条，跳过重复 ${r.skipped} 条，目标现有 ${r.target_total} 条。\n备份：\n源 ${r.source_backup}\n目标 ${r.target_backup}` + (ideStarted ? '' : '\n\n自动启动 IDE 失败，请手动打开。'))
+    showMerge.value = false
+    mergeTarget.value = ''
+    await store.fetchChatWorkspaces()
+    await store.fetchBackupList()
+    if (selectedWorkspace.value) {
+      await store.fetchWorkspaceChats(selectedWorkspace.value)
+    }
+  } catch (e: any) {
+    alert('合并失败: ' + (typeof e === 'string' ? e : e?.message || JSON.stringify(e)))
+  }
+}
+
+async function handleDeleteWorkspace() {
+  if (!selectedWorkspace.value) return
+  const name = currentWorkspaceName.value
+  if (!confirm('确定删除工作区【' + name + '】？\n将删除该工作区目录及其全部对话记录，此操作不可逆。\n（已自动备份到 文档\\qoder-backups）\n将关闭并重启 Qoder IDE。')) return
+  try {
+    const killed = await store.killQoderIde().catch(() => 0)
+    if (killed > 0) {
+      await new Promise(r => setTimeout(r, 2000))
+    }
+    const r = await store.deleteWorkspace(selectedWorkspace.value)
+    let ideStarted = true
+    try { await store.launchQoderIde() } catch { ideStarted = false }
+    let message = '已删除工作区。\n备份: ' + r.backup_path
+    if (!r.dir_deleted) message += '\n\n注意：工作区目录未删除（可能已不存在或删除失败）。'
+    if (!r.chat_key_deleted) message += '\n注意：全局对话记录未删除（未找到对应 key）。'
+    alert(message + (ideStarted ? '' : '\n\n自动启动 IDE 失败，请手动打开。'))
+    selectedWorkspace.value = ''
+    store.chatList = []
+    showMerge.value = false
+    await store.fetchChatWorkspaces()
+    await store.fetchBackupList()
+  } catch (e: any) {
+    alert('删除失败: ' + (typeof e === 'string' ? e : e?.message || JSON.stringify(e)))
   }
 }
 

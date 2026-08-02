@@ -5,10 +5,14 @@ src-tauri/target/
 node_modules/
 dist/
 
+# Build archives (版本化编译归档，不入版本库)
+releases/
+
 # Lock files (keep pnpm-lock)
 *.lock
 !pnpm-lock.yaml
 !Cargo.lock
 
 .claude/
+.qoder/
 记录.md

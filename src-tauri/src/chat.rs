@@ -252,6 +252,200 @@ pub fn delete_chats(workspace_id: &str, chat_ids: &[String]) -> Result<(), Strin
     Ok(())
 }
 
+// === 合并 / 删除工作区 ===
+
+#[derive(Debug, Serialize, Clone)]
+pub struct MergeResult {
+    pub merged: usize,        // 并入条数
+    pub skipped: usize,       // 重复跳过条数
+    pub target_total: usize,  // 目标合并后总数
+    pub source_backup: String,
+    pub target_backup: String,
+}
+
+/// 合并工作区对话：把源工作区对话移动并入目标工作区
+/// - 移动语义：并入后清空源工作区对话（源工作区保留）
+/// - 去重：按对话 id，目标已存在则跳过
+/// - 合并前自动备份源与目标
+pub fn merge_workspace_chats(source_id: &str, target_id: &str) -> Result<MergeResult, String> {
+    if source_id == target_id {
+        return Err("源与目标不能相同".to_string());
+    }
+
+    // 1. 自动备份源与目标
+    let source_backup_data = backup_workspace(source_id)?;
+    let source_backup = save_backup_to(&source_backup_data, None)?;
+    let target_backup_data = backup_workspace(target_id)?;
+    let target_backup = save_backup_to(&target_backup_data, None)?;
+
+    // 2. 读取源对话
+    let source_history = get_chat_history(source_id)?;
+    if source_history.is_empty() {
+        return Err("源工作区无对话，无需合并".to_string());
+    }
+
+    // 3. 读取目标对话，收集已有 id
+    let mut target_history = get_chat_history(target_id)?;
+    let existing_ids: std::collections::HashSet<String> =
+        target_history.iter().map(|h| h.id.clone()).collect();
+
+    // 4. 去重并入
+    let mut merged = 0usize;
+    let mut skipped = 0usize;
+    for chat in source_history {
+        if existing_ids.contains(&chat.id) {
+            skipped += 1;
+        } else {
+            target_history.push(chat);
+            merged += 1;
+        }
+    }
+    let target_total = target_history.len();
+
+    // 5. 写回全局库：目标写入合并数组，源写入空数组（事务保证原子性）
+    let base = get_qoder_base_path();
+    let global_db = base.join("User").join("globalStorage").join("state.vscdb");
+    let mut conn = rusqlite::Connection::open_with_flags(
+        &global_db,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(|e| format!("打开全局数据库失败（写模式）: {}", e))?;
+
+    let target_key = format!("lingma.chat.localHistory.{}", target_id);
+    let target_value = serde_json::to_string(&target_history)
+        .map_err(|e| format!("序列化目标对话失败: {}", e))?;
+    let source_key = format!("lingma.chat.localHistory.{}", source_id);
+
+    let tx = conn
+        .transaction()
+        .map_err(|e| format!("开启事务失败: {}", e))?;
+    tx.execute(
+        "INSERT OR REPLACE INTO ItemTable(key, value) VALUES(?1, ?2)",
+        rusqlite::params![target_key, target_value],
+    )
+    .map_err(|e| format!("写入目标对话失败: {}", e))?;
+    tx.execute(
+        "INSERT OR REPLACE INTO ItemTable(key, value) VALUES(?1, ?2)",
+        rusqlite::params![source_key, "[]"],
+    )
+    .map_err(|e| format!("清空源对话失败: {}", e))?;
+    tx.commit()
+        .map_err(|e| format!("提交事务失败: {}", e))?;
+
+    // 6. 清理源工作区视图残留（源备份已含原值，可回滚）
+    let source_ws_db = base
+        .join("User")
+        .join("workspaceStorage")
+        .join(source_id)
+        .join("state.vscdb");
+    if source_ws_db.exists() {
+        if let Ok(ws_conn) = rusqlite::Connection::open_with_flags(
+            &source_ws_db,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        ) {
+            let _ = ws_conn.execute(
+                "INSERT OR REPLACE INTO ItemTable(key, value) VALUES(?1, ?2)",
+                rusqlite::params!["aicoding.chat.views", "[]"],
+            );
+            let _ = ws_conn.execute(
+                "INSERT OR REPLACE INTO ItemTable(key, value) VALUES(?1, ?2)",
+                rusqlite::params!["aicoding.chat.tabs", "{\"activeTabId\":\"\",\"tabs\":[]}"],
+            );
+        }
+    }
+
+    // 7. 重建目标会话视图（best-effort）
+    if let Err(e) = rebuild_session_views(target_id) {
+        log::warn!("[chat] 合并后重建目标会话视图失败: {}", e);
+    }
+
+    log::info!(
+        "[chat] 合并完成：{} -> {}，并入 {} 条，跳过 {} 条，目标共 {} 条",
+        source_id, target_id, merged, skipped, target_total
+    );
+
+    Ok(MergeResult {
+        merged,
+        skipped,
+        target_total,
+        source_backup,
+        target_backup,
+    })
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct DeleteWorkspaceResult {
+    pub backup_path: String,
+    pub dir_deleted: bool,
+    pub chat_key_deleted: bool,
+}
+
+/// 删除整个工作区：删磁盘目录 + 清除全局库对话 key
+/// 删除前自动备份该工作区（失败则中止，保证可恢复）
+pub fn delete_workspace(workspace_id: &str) -> Result<DeleteWorkspaceResult, String> {
+    // 1. 校验 ID 合法性（防路径穿越）
+    if workspace_id.is_empty()
+        || workspace_id.contains('/')
+        || workspace_id.contains('\\')
+        || workspace_id.contains("..")
+    {
+        return Err("非法的工作区 ID".to_string());
+    }
+
+    let base = get_qoder_base_path();
+
+    // 2. 删除前自动备份
+    let backup_data = backup_workspace(workspace_id)?;
+    let backup_path = save_backup_to(&backup_data, None)?;
+
+    // 3. 删除磁盘目录（canonicalize + starts_with 越界防护）
+    //    最易失败的文件系统操作先执行：失败则立即返回、数据库尚未改动、状态一致可重试
+    let ws_dir = base
+        .join("User")
+        .join("workspaceStorage")
+        .join(workspace_id);
+    let mut dir_deleted = false;
+    if ws_dir.exists() {
+        let safe_root = std::fs::canonicalize(base.join("User").join("workspaceStorage"))
+            .map_err(|e| format!("解析工作区根目录失败: {}", e))?;
+        let target = std::fs::canonicalize(&ws_dir)
+            .map_err(|e| format!("解析目标目录失败: {}", e))?;
+        if !target.starts_with(&safe_root) {
+            return Err("不允许删除工作区目录之外的路径".to_string());
+        }
+        std::fs::remove_dir_all(&target)
+            .map_err(|e| format!("删除工作区目录失败: {}", e))?;
+        dir_deleted = true;
+    }
+
+    // 4. 清除全局库对话 key
+    let global_db = base.join("User").join("globalStorage").join("state.vscdb");
+    let mut chat_key_deleted = false;
+    if global_db.exists() {
+        let conn = rusqlite::Connection::open_with_flags(
+            &global_db,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(|e| format!("打开全局数据库失败（写模式）: {}", e))?;
+        let key = format!("lingma.chat.localHistory.{}", workspace_id);
+        let n = conn
+            .execute("DELETE FROM ItemTable WHERE key = ?1", [&key])
+            .map_err(|e| format!("删除对话记录失败: {}", e))?;
+        chat_key_deleted = n > 0;
+    }
+
+    log::info!(
+        "[chat] 删除工作区 {}：目录删除={}, 对话key删除={}",
+        workspace_id, dir_deleted, chat_key_deleted
+    );
+
+    Ok(DeleteWorkspaceResult {
+        backup_path,
+        dir_deleted,
+        chat_key_deleted,
+    })
+}
+
 /// 解码工作区路径（处理 file:/// URI 和 URL 编码）
 fn decode_workspace_path(raw: &str) -> String {
     let path = raw.strip_prefix("file:///").unwrap_or(raw);
@@ -411,7 +605,13 @@ pub fn save_backup_to(backup: &SessionBackup, save_path: Option<&str>) -> Result
         std::fs::create_dir_all(&backup_dir)
             .map_err(|e| format!("创建备份目录失败: {}", e))?;
         let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
-        let filename = format!("qoder-backup-{}.json", timestamp);
+        // 加入 workspace_id 区分，避免同一秒内连续备份（如合并的源/目标）因同名而互相覆盖
+        let ws = &backup.workspace_id;
+        let filename = if ws.is_empty() {
+            format!("qoder-backup-{}.json", timestamp)
+        } else {
+            format!("qoder-backup-{}-{}.json", ws, timestamp)
+        };
         backup_dir.join(&filename)
     };
 
